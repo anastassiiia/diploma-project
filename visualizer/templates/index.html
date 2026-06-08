@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Diploma Cluster Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.36.0/tabler-icons.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container py-4">
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Cluster Infrastructure Monitor</h2>
+            <div id="status-badge" class="badge bg-success">System Healthy</div>
+        </div>
+
+        <div class="row mb-4 g-3">
+            <div class="col-md-3">
+                <div class="card shadow-sm text-center p-3">
+                    <div class="stat-label text-muted mb-1">Реплік</div>
+                    <h2 id="total-replicas" style="color: #d97706;">0</h2>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm text-center p-3">
+                    <div class="stat-label text-muted mb-1">Середній CLS</div>
+                    <h2 id="avg-cls">0.000</h2>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm text-center p-3">
+                    <div class="stat-label text-muted mb-1">Latency (ms)</div>
+                    <h2 id="avg-art" style="color: #0284c7;">0.0</h2>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm text-center p-3">
+                    <div class="stat-label text-muted mb-1">Success Rate</div>
+                    <h2 id="success-rate" class="success-text">100%</h2>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card shadow-sm p-3">
+                    <h6 class="stat-label text-muted mb-3">Динаміка навантаження (CLS)</h6>
+                    <div style="position: relative; height: 200px; width: 100%;">
+                        <canvas id="loadChart" style="position:absolute;top:0;left:0;width:100%!important;height:100%!important;"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card shadow-sm p-4">
+                    <div class="header-row">
+                        <span class="lb-title">Керування балансуванням (HAProxy)</span>
+                        <span class="current-tag">
+                            <i class="ti ti-settings" aria-hidden="true" style="font-size:14px"></i>
+                            Поточний: <strong id="current-label">leastconn</strong>
+                        </span>
+                    </div>
+                    <div class="algo-grid">
+                        <button class="algo-btn" data-algo="roundrobin" onclick="selectAlgo(this)">
+                            <div class="algo-name">Round Robin</div>
+                            <div class="algo-sub">Рівномірний розподіл по черзі між усіма подами</div>
+                            <span class="algo-badge">roundrobin</span>
+                        </button>
+                        <button class="algo-btn active" data-algo="leastconn" onclick="selectAlgo(this)">
+                            <div class="algo-name">Least Connections</div>
+                            <div class="algo-sub">Запит іде до пода з найменшою кількістю активних з'єднань</div>
+                            <span class="algo-badge">leastconn</span>
+                        </button>
+                        <button class="algo-btn" data-algo="uri" onclick="selectAlgo(this)">
+                            <div class="algo-name">URI Hash</div>
+                            <div class="algo-sub">Однакова IP завжди йде на один і той самий под</div>
+                            <span class="algo-badge">uri</span>
+                        </button>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:12px">
+                        <button class="apply-btn" id="apply-btn" onclick="applyAlgo()">
+                            <div class="spinner" id="spinner"></div>
+                            <i class="ti ti-refresh" aria-hidden="true" id="apply-icon"></i>
+                            <span id="apply-label">Застосувати</span>
+                        </button>
+                        <span style="font-size:12px; color:#94a3b8" id="hint">Оберіть алгоритм і натисніть «Застосувати»</span>
+                    </div>
+                    <div class="status-msg" id="status-msg">
+                        <i class="ti ti-check" aria-hidden="true" id="status-icon"></i>
+                        <span id="status-text"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4 g-3">
+            <div class="col-md-7">
+                <div class="card shadow-sm p-3 h-100">
+                    <h6 class="stat-label text-muted mb-3">Розподіл запитів по вузлах (HAProxy Stats)</h6>
+                    <div id="haproxy-no-data" style="font-size:12px;color:#64748b;display:none;">
+                        HAProxy stats недоступні — порт 1024 не відповідає
+                    </div>
+                    <div style="position:relative; height:200px; width: 100%;">
+                        <canvas id="distChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-5">
+                <div class="card shadow-sm p-3 h-100">
+                    <h6 class="stat-label text-muted mb-2">Weighted балансування</h6>
+                    <p style="font-size:11px; color:#64748b; margin-bottom:10px;">Ваги розраховуються динамічно на основі CLS кожного пода</p>
+                    <div id="weights-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card shadow-sm p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="stat-label text-muted mb-0">Circuit Breaker статус</h6>
+                        <span id="cb-count" class="badge bg-success">0 активних</span>
+                    </div>
+                    <div id="cb-container">
+                        <span style="font-size:13px; color:#64748b;">Всі поди в ротації — Circuit Breaker не активний</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card shadow-sm p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="stat-label text-muted mb-0">Лог подій масштабування</h6>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <button onclick="downloadCSV()" class="btn-sm-outline" title="Завантажити CSV">
+                                <i class="ti ti-download" aria-hidden="true"></i> CSV
+                            </button>
+                            <button onclick="clearScalingLog()" class="btn-sm-outline btn-sm-danger" id="clear-log-btn" title="Очистити лог">
+                                <i class="ti ti-trash" aria-hidden="true"></i> Очистити
+                            </button>
+                        </div>
+                    </div>
+                    <div id="events-table-wrap" style="overflow-x:auto;">
+                        <table class="events-table" id="events-table">
+                            <thead>
+                                <tr>
+                                    <th>Час</th>
+                                    <th>Подія</th>
+                                    <th>До</th>
+                                    <th>Після</th>
+                                    <th>CLS</th>
+                                    <th>Крок</th>
+                                    <th>Реакція (с)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="events-tbody">
+                                <tr><td colspan="7" style="text-align:center; color:#64748b; padding:1rem;">Очікування подій масштабування...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h4 class="mb-3 stat-label text-muted">Вузли кластера</h4>
+        <div id="pods-container" class="row"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

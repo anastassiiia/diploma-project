@@ -1,0 +1,123 @@
+name: Manage GCP Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Операція керування інфраструктурою'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+jobs:
+  terraform:
+    name: 'Infrastructure Orchestration'
+    runs-on: ubuntu-latest
+
+    env:
+      ACTION: ${{ github.event.inputs.action || 'apply' }}
+
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        if: env.ACTION == 'plan'
+        run: terraform plan
+
+      - name: Terraform Apply
+        if: env.ACTION == 'apply'
+        run: terraform apply -auto-approve
+
+      - name: Terraform Destroy
+        if: env.ACTION == 'destroy'
+        run: terraform destroy -auto-approve
+
+      - name: Docker Auth
+        if: env.ACTION == 'apply'
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build and Push Docker Images
+        if: env.ACTION == 'apply'
+        working-directory: .
+        run: |
+          docker build --no-cache \
+            -t us-central1-docker.pkg.dev/${{ steps.auth.outputs.project_id }}/diploma-images/microservice:latest \
+            ./microservices
+          docker push us-central1-docker.pkg.dev/${{ steps.auth.outputs.project_id }}/diploma-images/microservice:latest
+
+          docker build --no-cache \
+            -t us-central1-docker.pkg.dev/${{ steps.auth.outputs.project_id }}/diploma-images/controller:latest \
+            ./controller
+          docker push us-central1-docker.pkg.dev/${{ steps.auth.outputs.project_id }}/diploma-images/controller:latest
+
+          docker build --no-cache \
+            -t us-central1-docker.pkg.dev/${{ steps.auth.outputs.project_id }}/diploma-images/visualizer:latest \
+            ./visualizer
+          docker push us-central1-docker.pkg.dev/${{ steps.auth.outputs.project_id }}/diploma-images/visualizer:latest
+
+          docker build --no-cache \
+            -t us-central1-docker.pkg.dev/${{ steps.auth.outputs.project_id }}/diploma-images/locust:latest \
+            ./locust
+          docker push us-central1-docker.pkg.dev/${{ steps.auth.outputs.project_id }}/diploma-images/locust:latest
+
+      - name: Setup Google Cloud CLI
+        if: env.ACTION == 'apply'
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: Connect to GKE Cluster
+        if: env.ACTION == 'apply'
+        run: gcloud container clusters get-credentials diploma-cluster --zone us-central1-a
+
+      - name: Install HAProxy Ingress
+        if: env.ACTION == 'apply'
+        run: |
+          helm repo add haproxytech https://haproxytech.github.io/helm-charts
+          helm repo update
+          helm upgrade --install haproxy-ingress haproxytech/kubernetes-ingress \
+            --namespace default \
+            --set controller.logging.level=info \
+            --set controller.replicaCount=1 \
+            --set controller.resources.requests.cpu=50m \
+            --set controller.resources.requests.memory=64Mi \
+            --set controller.service.type=LoadBalancer \
+            --set controller.service.enablePorts.quic=false \
+            --set controller.service.enablePorts.https=false \
+            --set controller.service.externalTrafficPolicy=Cluster \
+            --no-hooks \
+            --timeout 10m
+
+      - name: Deploy to Kubernetes
+        if: env.ACTION == 'apply'
+        working-directory: .
+        run: |
+          kubectl apply -f k8s/deployment.yml
+          kubectl apply -f k8s/ingress.yml
+          kubectl apply -f k8s/controller.yml
+          kubectl apply -f k8s/visualizer.yml
+          kubectl apply -f k8s/locust.yml

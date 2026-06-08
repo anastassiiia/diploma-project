@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: diploma-locust
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: diploma-locust
+  template:
+    metadata:
+      labels:
+        app: diploma-locust
+    spec:
+      containers:
+      - name: locust
+        image: us-central1-docker.pkg.dev/diploma-balancer/diploma-images/locust:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8089
+          name: web
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: diploma-locust-service
+  namespace: default
+spec:
+  type: LoadBalancer
+  selector:
+    app: diploma-locust
+  ports:
+  - port: 80
+    targetPort: 8089

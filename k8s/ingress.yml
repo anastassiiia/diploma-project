@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: diploma-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: "haproxy"
+    haproxy.org/load-balance: "leastconn"
+    haproxy.org/backend-config-snippet: |
+      option http-keep-alive
+      timeout http-keep-alive 10s
+      timeout connect 5s
+      timeout server 60s
+      option redispatch
+      retries 3
+      option httpchk GET /
+      http-check expect status 200
+spec:
+  ingressClassName: haproxy
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: diploma-app-service
+            port:
+              number: 8000

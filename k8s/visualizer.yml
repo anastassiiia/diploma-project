@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: diploma-visualizer
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: diploma-visualizer
+  template:
+    metadata:
+      labels:
+        app: diploma-visualizer
+    spec:
+      serviceAccountName: diploma-controller-sa
+      containers:
+      - name: visualizer
+        image: us-central1-docker.pkg.dev/diploma-balancer/diploma-images/visualizer:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: diploma-visualizer-service
+  namespace: default
+spec:
+  type: LoadBalancer
+  selector:
+    app: diploma-visualizer
+  ports:
+  - port: 80
+    targetPort: 5000
